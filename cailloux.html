@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Cailloux">
+<title>Cailloux</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600&family=DM+Sans:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *{-webkit-tap-highlight-color:transparent;box-sizing:border-box}
+  body{margin:0;padding:0;background:#F4ECD8;overscroll-behavior:none}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .display{font-family:'Fraunces',serif}
+  .sleep-hatch{background-image:repeating-linear-gradient(135deg,rgba(42,33,24,.08) 0,rgba(42,33,24,.08) 1px,transparent 1px,transparent 7px)}
+  ::-webkit-scrollbar{height:4px;width:4px}
+  ::-webkit-scrollbar-thumb{background:rgba(42,33,24,.18);border-radius:4px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useMemo}=React;
+
+const C={bg:"#F4ECD8",card:"#FBF5E7",cardEdge:"#E8DAB9",brownLight:"#D9BFA0",brownMed:"#A6794F",brownDark:"#6B4A30",yellow:"#E0A52C",yellowLight:"#EFC669",yellowDark:"#C28A1E",ink:"#2A2118",inkSoft:"#564832",line:"rgba(42,33,24,0.16)"};
+const PALETTE=[C.yellow,C.brownMed,C.yellowDark,C.brownDark,C.yellowLight,C.inkSoft,"#C2734A","#8B9468","#7C92A8","#8B4A56"];
+const DAY_LABELS=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
+const MONTH_NAMES=["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
+const EMOJIS=["🤸","🦵","💪","🧹","🧘","📖","🥋","💼","🎥","🌿","🌙","💧","✨","🥗","🧴","☀️"];
+
+const BASE_ZOOM=20,GUTTER=24,DAY_COL=76,CHK_COL=22,HEADER_H=34,CAPTION_H=22;
+const WEEK_W=GUTTER+7*(DAY_COL+CHK_COL)+GUTTER;
+const WEEK_NATURAL_H=CAPTION_H+HEADER_H+24*BASE_ZOOM+1;
+const MIN_SCALE=0.32,MAX_SCALE=1.3,DEFAULT_SCALE=0.45;
+const MIN_MONTH={y:2026,m:5},MAX_MONTH={y:2027,m:1};
+
+function pad(n){return String(n).padStart(2,"0")}
+function dateKey(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
+function mondayIndex(d){return(d.getDay()+6)%7}
+function startOfWeek(d){const x=new Date(d);x.setDate(x.getDate()-mondayIndex(x));x.setHours(0,0,0,0);return x}
+function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x}
+function isSameDay(a,b){return dateKey(a)===dateKey(b)}
+function minutesFromTime(t){const[h,m]=t.split(":").map(Number);return h*60+m}
+function monthIdx(y,m){return y*12+m}
+function monthLabel(y,m){return `${MONTH_NAMES[m][0].toUpperCase()}${MONTH_NAMES[m].slice(1)} ${y}`}
+function daysInMonth(y,m){return new Date(y,m+1,0).getDate()}
+function getMonthWeeks(y,m){const first=new Date(y,m,1),last=new Date(y,m+1,0),weeks=[];let cur=startOfWeek(first);while(cur<=last){weeks.push(cur);cur=addDays(cur,7)}return weeks}
+const ALL_MONTHS=(()=>{const arr=[];let idx=monthIdx(MIN_MONTH.y,MIN_MONTH.m);const max=monthIdx(MAX_MONTH.y,MAX_MONTH.m);while(idx<=max){arr.push({y:Math.floor(idx/12),m:idx%12});idx++}return arr})();
+function monthStats(habits,completions,y,m){const dc=daysInMonth(y,m);return habits.map(h=>{let scheduled=0,done=0;for(let day=1;day<=dc;day++){const d=new Date(y,m,day);if(h.days.includes(mondayIndex(d))){scheduled++;if(completions[`${h.id}__${dateKey(d)}`])done++}}return{habit:h,done,total:scheduled,percent:scheduled?(done/scheduled)*100:0}})}
+
+const DEFAULT_HABITS=[
+  {id:"h1",name:"Reformer",emoji:"🤸",color:PALETTE[0],days:[0],start:"07:00",duration:60},
+  {id:"h2",name:"Séance jambes",emoji:"🦵",color:PALETTE[1],days:[1],start:"07:00",duration:60},
+  {id:"h3",name:"Brossage à sec",emoji:"🧹",color:PALETTE[2],days:[2],start:"07:00",duration:60},
+  {id:"h4",name:"Séance bras",emoji:"💪",color:PALETTE[3],days:[3],start:"07:00",duration:60},
+  {id:"h5",name:"Taff",emoji:"💼",color:PALETTE[4],days:[0,1,2,3,4],start:"10:00",duration:480},
+  {id:"h6",name:"Contenu",emoji:"🎥",color:PALETTE[5],days:[0,1,2,3,4],start:"21:00",duration:120},
+  {id:"h7",name:"Étirements",emoji:"🧘",color:PALETTE[0],days:[5],start:"21:00",duration:90},
+  {id:"h8",name:"Anglais",emoji:"📖",color:PALETTE[1],days:[6],start:"09:30",duration:150},
+  {id:"h9",name:"Taiji wudang",emoji:"🥋",color:PALETTE[2],days:[6],start:"13:00",duration:120},
+];
+
+function DiamondLogo({size=22}){
+  return(
+    <svg width={size} height={size*0.84} viewBox="0 0 100 84" style={{flexShrink:0}}>
+      <polygon points="39,8 61,8 50,38" fill="#E8F5FF" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="61,8 73,13 50,38" fill="#94C0EC" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="73,13 79,26 50,38" fill="#3060AC" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="79,26 21,26 50,38" fill="#4C82C8" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="21,26 27,13 50,38" fill="#6AA4D8" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="27,13 39,8 50,38" fill="#BCE0F8" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="21,26 42,26 42,32 21,32" fill="#4A7CC0" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="42,26 58,26 58,32 42,32" fill="#76A8DA" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="58,26 79,26 79,32 58,32" fill="#28569C" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="21,32 42,32 50,82" fill="#5C90CC" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="42,32 58,32 50,82" fill="#96C4EE" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="58,32 79,32 50,82" fill="#2A5898" stroke="#102244" strokeWidth="1.2" strokeLinejoin="round"/>
+      <polygon points="45,10 55,10 50,22" fill="rgba(255,255,255,0.7)"/>
+    </svg>
+  );
+}
+
+function App(){
+  const[loaded,setLoaded]=useState(false);
+  const[tab,setTab]=useState("plan");
+  const[habits,setHabits]=useState(DEFAULT_HABITS);
+  const[completions,setCompletions]=useState({});
+  const[scale,setScale]=useState(DEFAULT_SCALE);
+  const[modal,setModal]=useState(null);
+  const[dragState,setDragState]=useState(null);
+  const scrollRef=useRef(null);
+  const loadedRef=useRef(false);
+  const longPressTimer=useRef(null);
+  const scaleRef=useRef(DEFAULT_SCALE);
+  const dragStateRef=useRef(null);
+  const today=new Date();
+
+  useEffect(()=>{scaleRef.current=scale},[scale]);
+  useEffect(()=>{dragStateRef.current=dragState},[dragState]);
+
+  // Charger depuis localStorage
+  useEffect(()=>{
+    try{
+      const stored=localStorage.getItem("cailloux-data");
+      if(stored){const p=JSON.parse(stored);if(p.habits)setHabits(p.habits);if(p.completions)setCompletions(p.completions)}
+    }catch(e){}
+    loadedRef.current=true;
+    setLoaded(true);
+  },[]);
+
+  // Sauvegarder dans localStorage
+  useEffect(()=>{
+    if(!loadedRef.current)return;
+    try{localStorage.setItem("cailloux-data",JSON.stringify({habits,completions}))}catch(e){}
+  },[habits,completions]);
+
+  // Drag : bloquer scroll + suivre le doigt
+  useEffect(()=>{
+    if(!dragState)return;
+    const handleMove=(e)=>{
+      e.preventDefault();
+      if(e.touches.length===1){const t=e.touches[0];setDragState(prev=>prev?{...prev,x:t.clientX,y:t.clientY}:null)}
+    };
+    const handleEnd=(e)=>{
+      clearTimeout(longPressTimer.current);
+      const ds=dragStateRef.current;
+      if(!ds)return;
+      const{clientX,clientY}=e.changedTouches[0];
+      const s=scaleRef.current;
+      const els=document.elementsFromPoint(clientX,clientY);
+      for(const el of els){
+        const ws=el.getAttribute("data-weekstart");
+        if(ws){
+          const rect=el.getBoundingClientRect();
+          const relX=(clientX-rect.left)/s,relY=(clientY-rect.top)/s;
+          const dayIdx=Math.min(6,Math.max(0,Math.floor((relX-GUTTER)/(DAY_COL+CHK_COL))));
+          const totalMins=Math.round(((relY-CAPTION_H-HEADER_H)/BASE_ZOOM)*60/15)*15;
+          const clamped=Math.min(23*60,Math.max(0,totalMins));
+          const newStart=`${pad(Math.floor(clamped/60))}:${pad(clamped%60)}`;
+          const isMultiDay=ds.habit.days.length>1;
+          setHabits(prev=>prev.map(h=>h.id===ds.habit.id?{...h,start:newStart,days:isMultiDay?h.days:[dayIdx]}:h));
+          break;
+        }
+      }
+      setDragState(null);
+    };
+    const handleCancel=()=>{clearTimeout(longPressTimer.current);setDragState(null)};
+    document.addEventListener("touchmove",handleMove,{passive:false});
+    document.addEventListener("touchend",handleEnd,{passive:true});
+    document.addEventListener("touchcancel",handleCancel,{passive:true});
+    return()=>{
+      document.removeEventListener("touchmove",handleMove);
+      document.removeEventListener("touchend",handleEnd);
+      document.removeEventListener("touchcancel",handleCancel);
+    };
+  },[!!dragState]);
+
+  // Pinch-to-zoom
+  useEffect(()=>{
+    const el=scrollRef.current;if(!el)return;
+    let initialDist=null,initialScale=DEFAULT_SCALE;
+    const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+    const onStart=e=>{if(e.touches.length===2){initialDist=dist(e.touches);initialScale=scaleRef.current}};
+    const onMove=e=>{if(e.touches.length===2&&initialDist){e.preventDefault();const ns=Math.min(MAX_SCALE,Math.max(MIN_SCALE,initialScale*(dist(e.touches)/initialDist)));setScale(Math.round(ns*100)/100)}};
+    const onEnd=e=>{if(e.touches.length<2)initialDist=null};
+    el.addEventListener("touchstart",onStart,{passive:true});
+    el.addEventListener("touchmove",onMove,{passive:false});
+    el.addEventListener("touchend",onEnd,{passive:true});
+    return()=>{el.removeEventListener("touchstart",onStart);el.removeEventListener("touchmove",onMove);el.removeEventListener("touchend",onEnd)};
+  },[]);
+
+  function toggleCompletion(habitId,date){const key=`${habitId}__${dateKey(date)}`;setCompletions(prev=>{const n={...prev};if(n[key])delete n[key];else n[key]=true;return n})}
+  function saveHabit(h){setHabits(prev=>prev.some(x=>x.id===h.id)?prev.map(x=>x.id===h.id?h:x):[...prev,h]);setModal(null)}
+  function deleteHabit(id){setHabits(prev=>prev.filter(h=>h.id!==id));setCompletions(prev=>{const n={...prev};Object.keys(n).forEach(k=>{if(k.startsWith(id+"__"))delete n[k]});return n});setModal(null)}
+  function onHabitLongPressStart(e,habit){const t=e.touches[0];longPressTimer.current=setTimeout(()=>{navigator.vibrate&&navigator.vibrate(40);setDragState({habit,x:t.clientX,y:t.clientY})},550)}
+  function onDragCancelTouch(){clearTimeout(longPressTimer.current)}
+  function scrollToToday(){const el=document.getElementById(`week-${dateKey(startOfWeek(today))}`);if(el)el.scrollIntoView({behavior:"smooth",block:"center",inline:"center"})}
+
+  if(!loaded)return <div style={{background:C.bg,color:C.ink,fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{opacity:0.6,fontSize:14}}>Chargement…</p></div>;
+
+  return(
+    <div style={{background:C.bg,color:C.ink,fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",paddingBottom:96}}>
+      <header style={{padding:"28px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <h1 className="display" style={{fontSize:24,margin:0}}>Cailloux</h1>
+            <DiamondLogo size={22}/>
+          </div>
+          <p className="mono" style={{fontSize:11,opacity:0.5,marginTop:2}}>ton carnet d'habitudes</p>
+        </div>
+        <div style={{display:"flex",borderRadius:999,padding:4,background:C.card,border:`1px solid ${C.cardEdge}`}}>
+          {[["plan","Planning"],["bilan","Bilan"]].map(([id,label])=>(
+            <button key={id} onClick={()=>setTab(id)} style={{padding:"6px 14px",borderRadius:999,fontSize:14,border:"none",cursor:"pointer",background:tab===id?C.ink:"transparent",color:tab===id?C.bg:C.inkSoft}}>{label}</button>
+          ))}
+        </div>
+      </header>
+
+      {tab==="plan"
+        ?<PlanView habits={habits} completions={completions} toggleCompletion={toggleCompletion} scale={scale} setScale={setScale} scrollRef={scrollRef} today={today} setModal={setModal} scrollToToday={scrollToToday} dragHandlers={{onHabitLongPressStart,onDragCancel:onDragCancelTouch}} isDragging={!!dragState}/>
+        :<BilanView habits={habits} completions={completions} today={today}/>
+      }
+
+      <button onClick={()=>setModal({})} style={{position:"fixed",bottom:24,right:20,width:56,height:56,borderRadius:999,background:C.yellow,color:C.ink,fontSize:24,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,0.18)",display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+
+      {modal!==null&&<HabitModal habit={modal} onSave={saveHabit} onDelete={deleteHabit} onClose={()=>setModal(null)}/>}
+      {dragState&&(
+        <div style={{position:"fixed",zIndex:50,pointerEvents:"none",left:dragState.x-40,top:dragState.y-22,background:dragState.habit.color,borderRadius:8,padding:"6px 10px",display:"flex",alignItems:"center",gap:6,opacity:0.92,transform:"scale(1.08)",boxShadow:"0 4px 16px rgba(0,0,0,0.25)"}}>
+          <span style={{fontSize:16}}>{dragState.habit.emoji}</span>
+          <span style={{fontSize:12,fontWeight:500,color:"white"}}>{dragState.habit.name}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlanView({habits,completions,toggleCompletion,scale,setScale,scrollRef,today,setModal,scrollToToday,dragHandlers,isDragging}){
+  return(
+    <div ref={scrollRef}>
+      <div style={{padding:"0 20px",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+        <button onClick={scrollToToday} className="mono" style={{padding:"6px 12px",borderRadius:999,fontSize:12,background:C.card,border:`1px solid ${C.cardEdge}`,cursor:"pointer"}}>Aujourd'hui</button>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span className="mono" style={{fontSize:10,opacity:0.5}}>vue</span>
+          <button onClick={()=>setScale(s=>Math.round(Math.max(MIN_SCALE,s-0.12)*100)/100)} style={{width:28,height:28,borderRadius:999,background:C.card,border:"none",cursor:"pointer",fontSize:16}}>–</button>
+          <button onClick={()=>setScale(s=>Math.round(Math.min(MAX_SCALE,s+0.12)*100)/100)} style={{width:28,height:28,borderRadius:999,background:C.card,border:"none",cursor:"pointer",fontSize:16}}>+</button>
+        </div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:28}}>
+        {ALL_MONTHS.map(({y,m})=>{
+          const weeks=getMonthWeeks(y,m);
+          const stats=monthStats(habits,completions,y,m);
+          return(
+            <div key={`${y}-${m}`}>
+              <p className="display" style={{fontSize:18,padding:"0 20px",marginBottom:8}}>{monthLabel(y,m)}</p>
+              <div style={{overflowX:"auto",padding:"0 20px 4px"}}>
+                <div style={{display:"flex",gap:12}}>
+                  {weeks.map((weekStart,wi)=>(
+                    <div key={wi} id={`week-${dateKey(weekStart)}`} data-weekstart={dateKey(weekStart)}
+                      style={{flexShrink:0,borderRadius:16,overflow:"hidden",width:WEEK_W*scale,height:WEEK_NATURAL_H*scale,background:C.card,border:`1px solid ${C.cardEdge}`}}>
+                      <div style={{width:WEEK_W,height:WEEK_NATURAL_H,transform:`scale(${scale})`,transformOrigin:"top left"}}>
+                        <WeekBlock weekStart={weekStart} habits={habits} completions={completions} toggleCompletion={toggleCompletion} today={today} onLongPress={dragHandlers.onHabitLongPressStart}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{padding:"12px 20px 4px",overflowX:"auto"}}>
+                <div style={{display:"flex",gap:12}}>
+                  {stats.map(s=>(
+                    <div key={s.habit.id} style={{flexShrink:0}}>
+                      <RingStat percent={s.percent} color={s.habit.color} label={`${s.habit.emoji} ${s.habit.name}`} score={`${s.done}/${s.total}`}/>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{padding:"8px 20px"}}>
+        <p className="mono" style={{fontSize:10,opacity:0.5,textTransform:"uppercase",letterSpacing:2,marginBottom:8}}>Habitudes ({habits.length})</p>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {habits.map(h=>(
+            <button key={h.id} onClick={()=>setModal(h)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:12,background:C.card,border:`1px solid ${C.cardEdge}`,cursor:"pointer",textAlign:"left"}}>
+              <span style={{width:10,height:10,borderRadius:999,background:h.color,flexShrink:0}}/>
+              <span style={{fontSize:14,flex:1}}>{h.emoji} {h.name}</span>
+              <span className="mono" style={{fontSize:10,opacity:0.5}}>{h.days.map(d=>DAY_LABELS[d]).join(" ")} · {h.start}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WeekBlock({weekStart,habits,completions,toggleCompletion,today,onLongPress}){
+  const days=Array.from({length:7},(_,i)=>addDays(weekStart,i));
+  const weekEnd=days[6];
+  const rangeLabel=weekStart.getMonth()===weekEnd.getMonth()?`${weekStart.getDate()}–${weekEnd.getDate()} ${MONTH_NAMES[weekStart.getMonth()].slice(0,3)}`:`${weekStart.getDate()} ${MONTH_NAMES[weekStart.getMonth()].slice(0,3)} – ${weekEnd.getDate()} ${MONTH_NAMES[weekEnd.getMonth()].slice(0,3)}`;
+  const bodyH=24*BASE_ZOOM;
+  const nowTop=(today.getHours()*60+today.getMinutes())/60*BASE_ZOOM;
+  return(
+    <div style={{width:WEEK_W}}>
+      <p className="mono" style={{fontSize:9,opacity:0.5,padding:"6px 8px 0",height:CAPTION_H}}>{rangeLabel}</p>
+      <div style={{display:"flex",height:HEADER_H}}>
+        <div style={{width:GUTTER}}/>
+        {days.map((d,i)=>{
+          const isToday=isSameDay(d,today);const dayIdx=mondayIndex(d);
+          return(
+            <div key={i} style={{width:DAY_COL+CHK_COL,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",borderRight:`1px solid ${C.brownMed}`}}>
+              <span className="mono" style={{fontSize:9,opacity:0.6}}>{DAY_LABELS[dayIdx]}</span>
+              <span className="display" style={{fontSize:12,width:20,height:20,borderRadius:999,display:"flex",alignItems:"center",justifyContent:"center",background:isToday?C.yellow:"transparent"}}>{d.getDate()}</span>
+            </div>
+          );
+        })}
+        <div style={{width:GUTTER}}/>
+      </div>
+      <div style={{display:"flex",height:bodyH,borderTop:`1px solid ${C.cardEdge}`,position:"relative"}}>
+        <div style={{width:GUTTER,position:"relative",flexShrink:0}}>
+          {Array.from({length:24}).map((_,h)=>(
+            <span key={h} className="mono" style={{position:"absolute",fontSize:7,opacity:0.45,top:h*BASE_ZOOM-4,right:3}}>{h}</span>
+          ))}
+        </div>
+        <div style={{position:"relative",display:"flex",flex:1}}>
+          {days.map((d,di)=>{
+            const dayIdx=mondayIndex(d);
+            const dayHabits=habits.filter(h=>h.days.includes(dayIdx));
+            const isToday=isSameDay(d,today);
+            return(
+              <div key={di} style={{position:"relative",flexShrink:0,width:DAY_COL+CHK_COL,height:bodyH,borderRight:`1px solid ${C.brownMed}`}}>
+                {Array.from({length:24}).map((_,h)=>(
+                  <div key={h} style={{position:"absolute",left:0,right:0,top:h*BASE_ZOOM,borderTop:`1px solid ${C.line}`}}/>
+                ))}
+                <div style={{position:"absolute",left:0,top:0,width:DAY_COL,height:bodyH}}>
+                  <div className="sleep-hatch" style={{position:"absolute",left:0,right:0,top:0,height:7*BASE_ZOOM}}/>
+                  {isToday&&<div style={{position:"absolute",left:0,right:0,top:nowTop,height:1.5,background:C.yellowDark}}/>}
+                  {dayHabits.map(h=>{
+                    const top=(minutesFromTime(h.start)/60)*BASE_ZOOM;
+                    const height=Math.max(12,(h.duration/60)*BASE_ZOOM);
+                    return(
+                      <div key={h.id} onTouchStart={e=>onLongPress(e,h)}
+                        style={{position:"absolute",top,height,left:2,right:2,background:`${h.color}E6`,borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",userSelect:"none"}}>
+                        {height>15&&<span style={{fontSize:9}}>{h.emoji}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{position:"absolute",top:0,left:DAY_COL,width:CHK_COL,height:bodyH}}>
+                  {dayHabits.map(h=>{
+                    const top=(minutesFromTime(h.start)/60)*BASE_ZOOM;
+                    const height=Math.max(12,(h.duration/60)*BASE_ZOOM);
+                    const key=`${h.id}__${dateKey(d)}`;
+                    const done=!!completions[key];
+                    return(
+                      <button key={h.id} onClick={()=>toggleCompletion(h.id,d)}
+                        style={{position:"absolute",top:top+height/2-7,left:3,width:14,height:14,borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,background:done?h.color:C.bg,border:`1px solid ${h.color}`,cursor:"pointer",padding:0}}>
+                        {done?"✓":""}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          <div style={{flexShrink:0,width:GUTTER}}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RingStat({percent,color,label,score}){
+  const size=60,sw=6,r=(size-sw)/2,c=2*Math.PI*r;
+  const dash=c*Math.min(1,Math.max(0,percent/100));
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+      <div style={{position:"relative",width:size,height:size}}>
+        <svg width={size} height={size} style={{transform:"rotate(-90deg)",position:"absolute",inset:0}}>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.cardEdge} strokeWidth={sw}/>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={sw} strokeDasharray={`${dash} ${c}`} strokeLinecap="round"/>
+        </svg>
+        <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <span className="mono" style={{fontSize:10}}>{Math.round(percent)}%</span>
+        </div>
+      </div>
+      <p style={{fontSize:10,textAlign:"center",lineHeight:1.3,maxWidth:64}}>{label}</p>
+      <p className="mono" style={{fontSize:9,opacity:0.5}}>{score}</p>
+    </div>
+  );
+}
+
+function BilanView({habits,completions,today}){
+  const nowIdx=monthIdx(today.getFullYear(),today.getMonth());
+  const rows=ALL_MONTHS.filter(({y,m})=>monthIdx(y,m)<nowIdx).map(({y,m})=>{
+    const stats=monthStats(habits,completions,y,m);
+    const avg=stats.length?stats.reduce((s,x)=>s+x.percent,0)/stats.length:0;
+    return{y,m,avg};
+  });
+  return(
+    <div style={{padding:"0 20px"}}>
+      <p className="mono" style={{fontSize:10,opacity:0.5,textTransform:"uppercase",letterSpacing:2,marginBottom:8}}>Comparaison mensuelle</p>
+      {rows.length===0
+        ?<div style={{borderRadius:16,padding:16,background:C.card,border:`1px solid ${C.cardEdge}`}}><p style={{fontSize:14,opacity:0.6}}>🔒 Disponible dès que {monthLabel(today.getFullYear(),today.getMonth())} sera terminé.</p></div>
+        :<div style={{borderRadius:16,padding:16,background:C.card,border:`1px solid ${C.cardEdge}`,display:"flex",flexDirection:"column",gap:10}}>
+          {rows.map(r=>(
+            <div key={`${r.y}-${r.m}`} style={{display:"flex",alignItems:"center",gap:10}}>
+              <span className="mono" style={{fontSize:10,opacity:0.6,width:80,flexShrink:0}}>{MONTH_NAMES[r.m].slice(0,3)} {r.y}</span>
+              <div style={{flex:1,height:8,borderRadius:999,overflow:"hidden",background:C.cardEdge}}>
+                <div style={{width:`${r.avg}%`,height:"100%",borderRadius:999,background:C.yellow}}/>
+              </div>
+              <span className="mono" style={{fontSize:10,opacity:0.6,width:36,textAlign:"right"}}>{Math.round(r.avg)}%</span>
+            </div>
+          ))}
+        </div>
+      }
+    </div>
+  );
+}
+
+function HabitModal({habit,onSave,onDelete,onClose}){
+  const isNew=!habit.id;
+  const[name,setName]=useState(habit.name||"");
+  const[emoji,setEmoji]=useState(habit.emoji||EMOJIS[0]);
+  const[color,setColor]=useState(habit.color||PALETTE[0]);
+  const[days,setDays]=useState(habit.days||[]);
+  const[start,setStart]=useState(habit.start||"08:00");
+  const[duration,setDuration]=useState(habit.duration||30);
+  function toggleDay(i){setDays(d=>d.includes(i)?d.filter(x=>x!==i):[...d,i].sort())}
+  function handleSave(){if(!name.trim()||days.length===0)return;onSave({id:habit.id||`h${Date.now()}`,name:name.trim(),emoji,color,days,start,duration:Number(duration)})}
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center",padding:16,background:"rgba(42,33,24,0.45)"}}>
+      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:400,borderRadius:24,padding:20,maxHeight:"85vh",overflowY:"auto",background:C.bg}}>
+        <h3 className="display" style={{fontSize:18,marginBottom:16}}>{isNew?"Nouvelle habitude":"Modifier l'habitude"}</h3>
+        <label className="mono" style={{fontSize:10,opacity:0.5,textTransform:"uppercase"}}>Nom</label>
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Ex. Méditation" style={{width:"100%",marginTop:4,marginBottom:12,padding:"8px 12px",borderRadius:12,fontSize:14,outline:"none",background:C.card,border:`1px solid ${C.cardEdge}`,boxSizing:"border-box"}}/>
+        <label className="mono" style={{fontSize:10,opacity:0.5,textTransform:"uppercase"}}>Icône</label>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:4,marginBottom:12}}>
+          {EMOJIS.map(e=>(
+            <button key={e} onClick={()=>setEmoji(e)} style={{width:36,height:36,borderRadius:999,border:`1px solid ${C.cardEdge}`,cursor:"pointer",fontSize:18,background:emoji===e?C.yellow:C.card}}>{e}</button>
+          ))}
+        </div>
+        <label className="mono" style={{fontSize:10,opacity:0.5,textTransform:"uppercase"}}>Couleur</label>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:4,marginBottom:12}}>
+          {PALETTE.map(c=>(
+            <button key={c} onClick={()=>setColor(c)} style={{width:32,height:32,borderRadius:999,background:c,border:"none",cursor:"pointer",outline:color===c?`2px solid ${C.ink}`:"none",outlineOffset:2}}/>
+          ))}
+        </div>
+        <label className="mono" style={{fontSize:10,opacity:0.5,textTransform:"uppercase"}}>Jours</label>
+        <div style={{display:"flex",gap:6,marginTop:4,marginBottom:12}}>
+          {DAY_LABELS.map((l,i)=>(
+            <button key={i} onClick={()=>toggleDay(i)} className="mono" style={{width:32,height:32,borderRadius:999,fontSize:12,border:days.includes(i)?"none":`1px solid ${C.cardEdge}`,cursor:"pointer",background:days.includes(i)?C.ink:C.card,color:days.includes(i)?C.bg:C.ink}}>{l[0]}</button>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:12,marginBottom:16}}>
+          <div style={{flex:1}}>
+            <label className="mono" style={{fontSize:10,opacity:0.5,textTransform:"uppercase"}}>Heure de début</label>
+            <input type="time" value={start} onChange={e=>setStart(e.target.value)} style={{width:"100%",marginTop:4,padding:"8px 12px",borderRadius:12,fontSize:14,outline:"none",background:C.card,border:`1px solid ${C.cardEdge}`,boxSizing:"border-box"}}/>
+          </div>
+          <div style={{flex:1}}>
+            <label className="mono" style={{fontSize:10,opacity:0.5,textTransform:"uppercase"}}>Durée (min)</label>
+            <input type="number" min={5} step={5} value={duration} onChange={e=>setDuration(e.target.value)} style={{width:"100%",marginTop:4,padding:"8px 12px",borderRadius:12,fontSize:14,outline:"none",background:C.card,border:`1px solid ${C.cardEdge}`,boxSizing:"border-box"}}/>
+          </div>
+        </div>
+        <button onClick={handleSave} style={{width:"100%",padding:"10px",borderRadius:12,fontSize:14,fontWeight:500,background:C.yellow,color:C.ink,border:"none",cursor:"pointer",marginBottom:8}}>Enregistrer</button>
+        {!isNew&&<button onClick={()=>onDelete(habit.id)} style={{width:"100%",padding:"10px",borderRadius:12,fontSize:14,background:"transparent",color:C.brownDark,border:"none",cursor:"pointer"}}>Supprimer cette habitude</button>}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
