@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Cailloux">
+<title>Cailloux</title>
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="shortcut icon" href="icon.png">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#F4ECD8;font-family:'Helvetica Neue',Arial,sans-serif;min-height:100vh;overscroll-behavior:none;padding-bottom:96px}
+button{border:none;cursor:pointer;background:none}
+input{border:none;outline:none}
+.mono{font-family:'Courier New',monospace}
+.serif{font-family:Georgia,serif}
+.hatch{background-image:repeating-linear-gradient(135deg,rgba(42,33,24,.08) 0,rgba(42,33,24,.08) 1px,transparent 1px,transparent 7px)}
+.ring-wrap{position:relative}
+.ring-svg{transform:rotate(-90deg);position:absolute;inset:0}
+.ring-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-family:'Courier New',monospace}
+::-webkit-scrollbar{height:4px;width:4px}
+::-webkit-scrollbar-thumb{background:rgba(42,33,24,.2);border-radius:4px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ── Constantes ──────────────────────────────────────────────────────────
+const C={bg:"#F4ECD8",card:"#FBF5E7",edge:"#E8DAB9",brnM:"#A6794F",brnD:"#6B4A30",yel:"#E0A52C",yelL:"#EFC669",yelD:"#C28A1E",ink:"#2A2118",soft:"#564832",line:"rgba(42,33,24,.16)"};
+const PAL=[C.yel,C.brnM,C.yelD,C.brnD,C.yelL,C.soft,"#C2734A","#8B9468","#7C92A8","#8B4A56"];
+const DAYS=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
+const MONTHS=["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
+const EMOJIS=["🤸","🦵","💪","🧹","🧘","📖","🥋","💼","🎥","🌿","🌙","💧","✨","🥗","🧴","☀️"];
+const BZ=20,GUT=24,DCOL=76,CHKCOL=22,HDR=34,CAP=22;
+const WW=GUT+7*(DCOL+CHKCOL)+GUT;
+const WH=CAP+HDR+24*BZ+1;
+const MIN_SC=0.32,MAX_SC=1.3,DEF_SC=0.45;
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+const pad=n=>String(n).padStart(2,"0");
+const dk=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const monIdx=d=>(d.getDay()+6)%7;
+function sow(d){const x=new Date(d);x.setDate(x.getDate()-monIdx(x));x.setHours(0,0,0,0);return x}
+function addD(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x}
+const sameDay=(a,b)=>dk(a)===dk(b);
+const mins=t=>{const[h,m]=t.split(":").map(Number);return h*60+m};
+const mIdx=(y,m)=>y*12+m;
+const mLbl=(y,m)=>`${MONTHS[m][0].toUpperCase()}${MONTHS[m].slice(1)} ${y}`;
+const dim=(y,m)=>new Date(y,m+1,0).getDate();
+function getWeeks(y,m){const f=new Date(y,m,1),l=new Date(y,m+1,0),w=[];let c=sow(f);while(c<=l){w.push(c);c=addD(c,7)}return w}
+const ALL_M=(()=>{const a=[];let i=mIdx(2026,5);while(i<=mIdx(2027,1)){a.push({y:Math.floor(i/12),m:i%12});i++}return a})();
+
+// ── État ─────────────────────────────────────────────────────────────────
+const DEF_H=[
+  {id:"h1",name:"Reformer",emoji:"🤸",color:PAL[0],days:[0],start:"07:00",dur:60},
+  {id:"h2",name:"Séance jambes",emoji:"🦵",color:PAL[1],days:[1],start:"07:00",dur:60},
+  {id:"h3",name:"Brossage à sec",emoji:"🧹",color:PAL[2],days:[2],start:"07:00",dur:60},
+  {id:"h4",name:"Séance bras",emoji:"💪",color:PAL[3],days:[3],start:"07:00",dur:60},
+  {id:"h5",name:"Taff",emoji:"💼",color:PAL[4],days:[0,1,2,3,4],start:"10:00",dur:480},
+  {id:"h6",name:"Contenu",emoji:"🎥",color:PAL[5],days:[0,1,2,3,4],start:"21:00",dur:120},
+  {id:"h7",name:"Étirements",emoji:"🧘",color:PAL[0],days:[5],start:"21:00",dur:90},
+  {id:"h8",name:"Anglais",emoji:"📖",color:PAL[1],days:[6],start:"09:30",dur:150},
+  {id:"h9",name:"Taiji wudang",emoji:"🥋",color:PAL[2],days:[6],start:"13:00",dur:120},
+];
+let S={tab:"plan",habits:[...DEF_H],done:{},scale:DEF_SC,modal:null,drag:null};
+function load(){try{const d=localStorage.getItem("cailloux");if(d){const p=JSON.parse(d);if(p.habits)S.habits=p.habits;if(p.done)S.done=p.done}}catch(e){}}
+function save(){try{localStorage.setItem("cailloux",JSON.stringify({habits:S.habits,done:S.done}))}catch(e){}}
+load();
+
+// ── Drag state ────────────────────────────────────────────────────────────
+let lpTimer=null,scaleRef=DEF_SC,ghostEl=null;
+function startLongPress(e,h){
+  const t=e.touches[0];
+  lpTimer=setTimeout(()=>{
+    navigator.vibrate&&navigator.vibrate(40);
+    S.drag={habit:h,x:t.clientX,y:t.clientY};
+    showGhost();
+    document.addEventListener("touchmove",onDragMove,{passive:false});
+    document.addEventListener("touchend",onDragEnd,{passive:true});
+  },550);
+}
+function cancelLP(){clearTimeout(lpTimer)}
+function showGhost(){
+  if(!ghostEl){ghostEl=document.createElement("div");ghostEl.style.cssText="position:fixed;z-index:999;pointer-events:none;border-radius:8px;padding:6px 10px;display:flex;align-items:center;gap:6px;opacity:.92;transform:scale(1.08);box-shadow:0 4px 16px rgba(0,0,0,.25)";document.body.appendChild(ghostEl)}
+  const h=S.drag.habit;
+  ghostEl.style.background=h.color;
+  ghostEl.style.left=(S.drag.x-40)+"px";
+  ghostEl.style.top=(S.drag.y-22)+"px";
+  ghostEl.innerHTML=`<span style="font-size:16px">${h.emoji}</span><span style="font-size:12px;font-weight:500;color:white">${h.name}</span>`;
+}
+function onDragMove(e){
+  e.preventDefault();
+  if(!S.drag||!e.touches[0])return;
+  const t=e.touches[0];
+  S.drag.x=t.clientX;S.drag.y=t.clientY;
+  if(ghostEl){ghostEl.style.left=(t.clientX-40)+"px";ghostEl.style.top=(t.clientY-22)+"px"}
+}
+function onDragEnd(e){
+  document.removeEventListener("touchmove",onDragMove);
+  document.removeEventListener("touchend",onDragEnd);
+  if(!S.drag)return;
+  const{clientX:cx,clientY:cy}=e.changedTouches[0];
+  const els=document.elementsFromPoint(cx,cy);
+  for(const el of els){
+    const ws=el.getAttribute("data-ws");
+    if(ws){
+      const r=el.getBoundingClientRect(),s=scaleRef;
+      const relX=(cx-r.left)/s,relY=(cy-r.top)/s;
+      const dayIdx=Math.min(6,Math.max(0,Math.floor((relX-GUT)/(DCOL+CHKCOL))));
+      const tm=Math.round(((relY-CAP-HDR)/BZ)*60/15)*15;
+      const cl=Math.min(23*60,Math.max(0,tm));
+      const ns=`${pad(Math.floor(cl/60))}:${pad(cl%60)}`;
+      const isM=S.drag.habit.days.length>1;
+      S.habits=S.habits.map(h=>h.id===S.drag.habit.id?{...h,start:ns,days:isM?h.days:[dayIdx]}:h);
+      save();break;
+    }
+  }
+  S.drag=null;
+  if(ghostEl){ghostEl.remove();ghostEl=null}
+  render();
+}
+
+// ── SVG Diamant ───────────────────────────────────────────────────────────
+function diamondSVG(size){
+  const s=size,h=s*.84;
+  return`<svg width="${s}" height="${h}" viewBox="0 0 100 84"><polygon points="39,8 61,8 50,38" fill="#E8F5FF" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="61,8 73,13 50,38" fill="#94C0EC" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="73,13 79,26 50,38" fill="#3060AC" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="79,26 21,26 50,38" fill="#4C82C8" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="21,26 27,13 50,38" fill="#6AA4D8" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="27,13 39,8 50,38" fill="#BCE0F8" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="21,26 42,26 42,32 21,32" fill="#4A7CC0" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="42,26 58,26 58,32 42,32" fill="#76A8DA" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="58,26 79,26 79,32 58,32" fill="#28569C" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="21,32 42,32 50,82" fill="#5C90CC" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="42,32 58,32 50,82" fill="#96C4EE" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="58,32 79,32 50,82" fill="#2A5898" stroke="#102244" stroke-width="1.2" stroke-linejoin="round"/><polygon points="45,10 55,10 50,22" fill="rgba(255,255,255,0.7)"/></svg>`;
+}
+
+// ── Ring stat ─────────────────────────────────────────────────────────────
+function ringHTML(pct,color,label,score){
+  const sz=60,sw=6,r=(sz-sw)/2,c=2*Math.PI*r,dash=c*Math.min(1,Math.max(0,pct/100));
+  return`<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex-shrink:0">
+    <div class="ring-wrap" style="width:${sz}px;height:${sz}px">
+      <svg class="ring-svg" width="${sz}" height="${sz}"><circle cx="${sz/2}" cy="${sz/2}" r="${r}" fill="none" stroke="${C.edge}" stroke-width="${sw}"/><circle cx="${sz/2}" cy="${sz/2}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash} ${c}" stroke-linecap="round"/></svg>
+      <div class="ring-label">${Math.round(pct)}%</div>
+    </div>
+    <p style="font-size:10px;text-align:center;line-height:1.3;max-width:64px">${label}</p>
+    <p class="mono" style="font-size:9px;opacity:.5">${score}</p>
+  </div>`;
+}
+
+// ── Stats mensuelles ──────────────────────────────────────────────────────
+function mStats(y,m){
+  const dc=dim(y,m);
+  return S.habits.map(h=>{
+    let sched=0,done=0;
+    for(let d=1;d<=dc;d++){const dt=new Date(y,m,d);if(h.days.includes(monIdx(dt))){sched++;if(S.done[`${h.id}__${dk(dt)}`])done++}}
+    return{h,done,total:sched,pct:sched?done/sched*100:0};
+  });
+}
+
+// ── WeekBlock HTML ────────────────────────────────────────────────────────
+function weekHTML(ws){
+  const today=new Date();
+  const days=Array.from({length:7},(_,i)=>addD(ws,i));
+  const we=days[6];
+  const lbl=ws.getMonth()===we.getMonth()?`${ws.getDate()}–${we.getDate()} ${MONTHS[ws.getMonth()].slice(0,3)}`:`${ws.getDate()} ${MONTHS[ws.getMonth()].slice(0,3)} – ${we.getDate()} ${MONTHS[we.getMonth()].slice(0,3)}`;
+  const bH=24*BZ;
+  const nowTop=(today.getHours()*60+today.getMinutes())/60*BZ;
+
+  let hdrCols="";
+  days.forEach(d=>{
+    const isTod=sameDay(d,today);
+    const di=monIdx(d);
+    hdrCols+=`<div style="width:${DCOL+CHKCOL}px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-right:1px solid ${C.brnM}">
+      <span class="mono" style="font-size:9px;opacity:.6">${DAYS[di]}</span>
+      <span class="serif" style="font-size:12px;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${isTod?C.yel:"transparent"}">${d.getDate()}</span>
+    </div>`;
+  });
+
+  let bodyCols="";
+  const hourTicks=Array.from({length:24},(_,h)=>`<div style="position:absolute;left:0;right:0;top:${h*BZ}px;border-top:1px solid ${C.line}"></div>`).join("");
+  const hourLabels=Array.from({length:24},(_,h)=>`<span class="mono" style="position:absolute;font-size:7px;opacity:.45;top:${h*BZ-4}px;right:3px">${h}</span>`).join("");
+
+  days.forEach(d=>{
+    const di=monIdx(d);
+    const dh=S.habits.filter(h=>h.days.includes(di));
+    const isTod=sameDay(d,today);
+    let habitBlocks="",checkBoxes="";
+    dh.forEach(h=>{
+      const top=mins(h.start)/60*BZ;
+      const ht=Math.max(12,h.dur/60*BZ);
+      const key=`${h.id}__${dk(d)}`;
+      const done=!!S.done[key];
+      habitBlocks+=`<div data-hid="${h.id}" data-dk="${dk(d)}" style="position:absolute;top:${top}px;height:${ht}px;left:2px;right:2px;background:${h.color}E6;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;user-select:none">${ht>15?`<span style="font-size:9px">${h.emoji}</span>`:""}</div>`;
+      checkBoxes+=`<button data-chk="${key}" style="position:absolute;top:${top+ht/2-7}px;left:3px;width:14px;height:14px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:8px;background:${done?h.color:C.bg};border:1px solid ${h.color}">${done?"✓":""}</button>`;
+    });
+    bodyCols+=`<div style="position:relative;flex-shrink:0;width:${DCOL+CHKCOL}px;height:${bH}px;border-right:1px solid ${C.brnM}">
+      ${hourTicks}
+      <div style="position:absolute;left:0;top:0;width:${DCOL}px;height:${bH}px">
+        <div class="hatch" style="position:absolute;left:0;right:0;top:0;height:${7*BZ}px"></div>
+        ${isTod?`<div style="position:absolute;left:0;right:0;top:${nowTop}px;height:1.5px;background:${C.yelD}"></div>`:""}
+        ${habitBlocks}
+      </div>
+      <div style="position:absolute;top:0;left:${DCOL}px;width:${CHKCOL}px;height:${bH}px">${checkBoxes}</div>
+    </div>`;
+  });
+
+  return`<div data-ws="${dk(ws)}" style="flex-shrink:0;border-radius:16px;overflow:hidden;background:${C.card};border:1px solid ${C.edge};width:${WW*S.scale}px;height:${WH*S.scale}px">
+    <div style="width:${WW}px;height:${WH}px;transform:scale(${S.scale});transform-origin:top left">
+      <p class="mono" style="font-size:9px;opacity:.5;padding:6px 8px 0;height:${CAP}px">${lbl}</p>
+      <div style="display:flex;height:${HDR}px">
+        <div style="width:${GUT}px"></div>${hdrCols}<div style="width:${GUT}px"></div>
+      </div>
+      <div style="display:flex;height:${bH}px;border-top:1px solid ${C.edge}">
+        <div style="position:relative;width:${GUT}px;flex-shrink:0">${hourLabels}</div>
+        <div style="position:relative;display:flex;flex:1">${bodyCols}<div style="flex-shrink:0;width:${GUT}px"></div></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Modal ajout/édition ───────────────────────────────────────────────────
+function modalHTML(){
+  const h=S.modal;const isNew=!h.id;
+  const name=h.name||"";const emoji=h.emoji||EMOJIS[0];const color=h.color||PAL[0];
+  const days=h.days||[];const start=h.start||"08:00";const dur=h.dur||30;
+  const emojiBtns=EMOJIS.map(e=>`<button onclick="setME('${e}')" style="width:36px;height:36px;border-radius:50%;border:1px solid ${C.edge};font-size:18px;background:${emoji===e?C.yel:C.card}">${e}</button>`).join("");
+  const colorBtns=PAL.map(c=>`<button onclick="setMC('${c}')" style="width:32px;height:32px;border-radius:50%;background:${c};outline:${color===c?`2px solid ${C.ink}`:'none'};outline-offset:2px"></button>`).join("");
+  const dayBtns=DAYS.map((l,i)=>`<button onclick="setMD(${i})" class="mono" style="width:32px;height:32px;border-radius:50%;font-size:12px;background:${days.includes(i)?C.ink:C.card};color:${days.includes(i)?C.bg:C.ink};border:${days.includes(i)?'none':`1px solid ${C.edge}`}">${l[0]}</button>`).join("");
+  return`<div onclick="closeModal()" style="position:fixed;inset:0;z-index:50;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:rgba(42,33,24,.45)">
+    <div onclick="event.stopPropagation()" style="width:100%;max-width:400px;border-radius:24px;padding:20px;max-height:85vh;overflow-y:auto;background:${C.bg}">
+      <h3 class="serif" style="font-size:18px;margin-bottom:16px">${isNew?"Nouvelle habitude":"Modifier l'habitude"}</h3>
+      <label class="mono" style="font-size:10px;opacity:.5;text-transform:uppercase">Nom</label>
+      <input id="mName" value="${name}" placeholder="Ex. Méditation" style="width:100%;margin-top:4px;margin-bottom:12px;padding:8px 12px;border-radius:12px;font-size:14px;background:${C.card};border:1px solid ${C.edge}">
+      <label class="mono" style="font-size:10px;opacity:.5;text-transform:uppercase">Icône</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;margin-bottom:12px">${emojiBtns}</div>
+      <label class="mono" style="font-size:10px;opacity:.5;text-transform:uppercase">Couleur</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;margin-bottom:12px">${colorBtns}</div>
+      <label class="mono" style="font-size:10px;opacity:.5;text-transform:uppercase">Jours</label>
+      <div style="display:flex;gap:6px;margin-top:4px;margin-bottom:12px">${dayBtns}</div>
+      <div style="display:flex;gap:12px;margin-bottom:16px">
+        <div style="flex:1"><label class="mono" style="font-size:10px;opacity:.5;text-transform:uppercase">Heure début</label>
+        <input id="mStart" type="time" value="${start}" style="width:100%;margin-top:4px;padding:8px 12px;border-radius:12px;font-size:14px;background:${C.card};border:1px solid ${C.edge}"></div>
+        <div style="flex:1"><label class="mono" style="font-size:10px;opacity:.5;text-transform:uppercase">Durée (min)</label>
+        <input id="mDur" type="number" min="5" step="5" value="${dur}" style="width:100%;margin-top:4px;padding:8px 12px;border-radius:12px;font-size:14px;background:${C.card};border:1px solid ${C.edge}"></div>
+      </div>
+      <button onclick="saveModal()" style="width:100%;padding:10px;border-radius:12px;font-size:14px;font-weight:500;background:${C.yel};color:${C.ink}">Enregistrer</button>
+      ${!isNew?`<button onclick="deleteH('${h.id}')" style="width:100%;padding:10px;border-radius:12px;font-size:14px;background:transparent;color:${C.brnD};margin-top:8px">Supprimer</button>`:""}
+    </div>
+  </div>`;
+}
+
+// ── Modal interactions ────────────────────────────────────────────────────
+window.closeModal=()=>{S.modal=null;render()};
+window.setME=e=>{S.modal={...S.modal,emoji:e};render()};
+window.setMC=c=>{S.modal={...S.modal,color:c};render()};
+window.setMD=i=>{const d=S.modal.days||[];S.modal={...S.modal,days:d.includes(i)?d.filter(x=>x!==i):[...d,i].sort()};render()};
+window.saveModal=()=>{
+  const name=document.getElementById("mName")?.value?.trim();
+  const start=document.getElementById("mStart")?.value||"08:00";
+  const dur=Number(document.getElementById("mDur")?.value)||30;
+  if(!name||!(S.modal.days||[]).length)return;
+  const h={...S.modal,id:S.modal.id||`h${Date.now()}`,name,start,dur};
+  S.habits=S.habits.some(x=>x.id===h.id)?S.habits.map(x=>x.id===h.id?h:x):[...S.habits,h];
+  S.modal=null;save();render();
+};
+window.deleteH=id=>{S.habits=S.habits.filter(h=>h.id!==id);S.modal=null;save();render()};
+window.toggleDone=(key,color)=>{
+  if(S.done[key])delete S.done[key];else S.done[key]=true;
+  save();
+  const btn=document.querySelector(`[data-chk="${key}"]`);
+  if(btn){btn.style.background=S.done[key]?color:C.bg;btn.textContent=S.done[key]?"✓":""}
+};
+window.openModal=h=>{S.modal=h||{};render()};
+window.setTab=t=>{S.tab=t;render()};
+window.goToday=()=>{const today=new Date();const id=`week-${dk(sow(today))}`;const el=document.getElementById(id)||document.querySelector(`[data-ws="${dk(sow(today))}"]`);if(el)el.scrollIntoView({behavior:"smooth",block:"center"})};
+window.zoomIn=()=>{S.scale=Math.min(MAX_SC,Math.round((S.scale+.12)*100)/100);applyZoom()};
+window.zoomOut=()=>{S.scale=Math.max(MIN_SC,Math.round((S.scale-.12)*100)/100);applyZoom()};
+function applyZoom(){scaleRef=S.scale;document.querySelectorAll("[data-ws]").forEach(el=>{const inner=el.querySelector("div");if(inner){el.style.width=WW*S.scale+"px";el.style.height=WH*S.scale+"px";inner.style.transform=`scale(${S.scale})`}})}
+
+// ── Render principal ──────────────────────────────────────────────────────
+function render(){
+  scaleRef=S.scale;
+  const today=new Date();
+
+  let planHTML="",bilanHTML="";
+
+  if(S.tab==="plan"){
+    let months="";
+    ALL_M.forEach(({y,m})=>{
+      const weeks=getWeeks(y,m);
+      const stats=mStats(y,m);
+      const weekBlocks=weeks.map(ws=>`<div id="week-${dk(ws)}">${weekHTML(ws)}</div>`).join("");
+      const rings=stats.map(s=>ringHTML(s.pct,s.h.color,`${s.h.emoji} ${s.h.name}`,`${s.done}/${s.total}`)).join("");
+      const habitList=S.habits.map(h=>`<button onclick="openModal(${JSON.stringify(h).replace(/"/g,'&quot;')})" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:12px;background:${C.card};border:1px solid ${C.edge};text-align:left;width:100%"><span style="width:10px;height:10px;border-radius:50%;background:${h.color};flex-shrink:0"></span><span style="font-size:14px;flex:1">${h.emoji} ${h.name}</span><span class="mono" style="font-size:10px;opacity:.5">${h.days.map(d=>DAYS[d]).join(" ")} · ${h.start}</span></button>`).join("");
+      months+=`<div>
+        <p class="serif" style="font-size:18px;padding:0 20px;margin-bottom:8px">${mLbl(y,m)}</p>
+        <div style="overflow-x:auto;padding:0 20px 4px"><div style="display:flex;gap:12px">${weekBlocks}</div></div>
+        <div style="overflow-x:auto;padding:12px 20px 4px"><div style="display:flex;gap:12px">${rings}</div></div>
+      </div>`;
+    });
+    const hList=S.habits.map(h=>`<button onclick="openModal(${JSON.stringify(h).replace(/"/g,'&quot;')})" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:12px;background:${C.card};border:1px solid ${C.edge};text-align:left;width:100%"><span style="width:10px;height:10px;border-radius:50%;background:${h.color};flex-shrink:0"></span><span style="font-size:14px;flex:1">${h.emoji} ${h.name}</span><span class="mono" style="font-size:10px;opacity:.5">${h.days.map(d=>DAYS[d]).join(" ")} · ${h.start}</span></button>`).join("");
+    planHTML=`<div style="padding:0 20px;display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <button onclick="goToday()" class="mono" style="padding:6px 12px;border-radius:999px;font-size:12px;background:${C.card};border:1px solid ${C.edge}">Aujourd'hui</button>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="mono" style="font-size:10px;opacity:.5">vue</span>
+        <button onclick="zoomOut()" style="width:28px;height:28px;border-radius:50%;background:${C.card};font-size:16px">–</button>
+        <button onclick="zoomIn()" style="width:28px;height:28px;border-radius:50%;background:${C.card};font-size:16px">+</button>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:28px">${months}</div>
+    <div style="padding:8px 20px">
+      <p class="mono" style="font-size:10px;opacity:.5;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px">Habitudes (${S.habits.length})</p>
+      <div style="display:flex;flex-direction:column;gap:6px">${hList}</div>
+    </div>`;
+  } else {
+    const nowIdx=mIdx(today.getFullYear(),today.getMonth());
+    const rows=ALL_M.filter(({y,m})=>mIdx(y,m)<nowIdx).map(({y,m})=>{
+      const stats=mStats(y,m);const avg=stats.length?stats.reduce((s,x)=>s+x.pct,0)/stats.length:0;return{y,m,avg};
+    });
+    const rowsHTML=rows.length===0?`<p style="font-size:14px;opacity:.6">🔒 Disponible dès que ${mLbl(today.getFullYear(),today.getMonth())} sera terminé.</p>`:
+      rows.map(r=>`<div style="display:flex;align-items:center;gap:10px"><span class="mono" style="font-size:10px;opacity:.6;width:80px;flex-shrink:0">${MONTHS[r.m].slice(0,3)} ${r.y}</span><div style="flex:1;height:8px;border-radius:999px;overflow:hidden;background:${C.edge}"><div style="width:${r.avg}%;height:100%;border-radius:999px;background:${C.yel}"></div></div><span class="mono" style="font-size:10px;opacity:.6;width:36px;text-align:right">${Math.round(r.avg)}%</span></div>`).join("");
+    bilanHTML=`<div style="padding:0 20px"><p class="mono" style="font-size:10px;opacity:.5;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px">Comparaison mensuelle</p><div style="border-radius:16px;padding:16px;background:${C.card};border:1px solid ${C.edge};display:flex;flex-direction:column;gap:10px">${rowsHTML}</div></div>`;
+  }
+
+  document.getElementById("app").innerHTML=`
+    <header style="padding:28px 20px 16px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <h1 class="serif" style="font-size:24px">${"Cailloux"}</h1>
+          ${diamondSVG(22)}
+        </div>
+        <p class="mono" style="font-size:11px;opacity:.5;margin-top:2px">ton carnet d'habitudes</p>
+      </div>
+      <div style="display:flex;border-radius:999px;padding:4px;background:${C.card};border:1px solid ${C.edge}">
+        <button onclick="setTab('plan')" style="padding:6px 14px;border-radius:999px;font-size:14px;background:${S.tab==="plan"?C.ink:"transparent"};color:${S.tab==="plan"?C.bg:C.soft}">Planning</button>
+        <button onclick="setTab('bilan')" style="padding:6px 14px;border-radius:999px;font-size:14px;background:${S.tab==="bilan"?C.ink:"transparent"};color:${S.tab==="bilan"?C.bg:C.soft}">Bilan</button>
+      </div>
+    </header>
+    ${S.tab==="plan"?planHTML:bilanHTML}
+    <button onclick="openModal({})" style="position:fixed;bottom:24px;right:20px;width:56px;height:56px;border-radius:50%;background:${C.yel};color:${C.ink};font-size:24px;box-shadow:0 4px 16px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center">+</button>
+    ${S.modal!==null?modalHTML():""}
+  `;
+
+  // Attacher les événements tactiles sur les blocs d'habitudes
+  document.querySelectorAll("[data-hid]").forEach(el=>{
+    el.addEventListener("touchstart",e=>{
+      const hid=el.getAttribute("data-hid");
+      const h=S.habits.find(x=>x.id===hid);
+      if(h)startLongPress(e,h);
+    },{passive:true});
+    el.addEventListener("touchend",cancelLP,{passive:true});
+    el.addEventListener("touchcancel",cancelLP,{passive:true});
+  });
+
+  // Checkboxes
+  document.querySelectorAll("[data-chk]").forEach(btn=>{
+    const key=btn.getAttribute("data-chk");
+    const hid=key.split("__")[0];
+    const h=S.habits.find(x=>x.id===hid);
+    btn.addEventListener("click",()=>{if(h)toggleDone(key,h.color)});
+  });
+
+  // Pinch zoom
+  setupPinch();
+}
+
+// ── Pinch zoom ────────────────────────────────────────────────────────────
+function setupPinch(){
+  const container=document.getElementById("app");
+  let dist0=null,sc0=S.scale;
+  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+  container.addEventListener("touchstart",e=>{if(e.touches.length===2){dist0=dist(e.touches);sc0=S.scale}},{passive:true});
+  container.addEventListener("touchmove",e=>{
+    if(e.touches.length===2&&dist0){
+      e.preventDefault();
+      const ns=Math.min(MAX_SC,Math.max(MIN_SC,sc0*dist(e.touches)/dist0));
+      S.scale=Math.round(ns*100)/100;scaleRef=S.scale;applyZoom();
+    }
+  },{passive:false});
+  container.addEventListener("touchend",e=>{if(e.touches.length<2)dist0=null},{passive:true});
+}
+
+render();
+</script>
+</body>
+</html>
